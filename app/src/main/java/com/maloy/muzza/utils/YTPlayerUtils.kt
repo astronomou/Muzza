@@ -204,9 +204,14 @@ object YTPlayerUtils {
     ): PlayerResponse.StreamingData.Format? {
         Timber.tag(logTag).d("Finding format with audioQuality: $audioQuality, network metered: ${connectivityManager.isActiveNetworkMetered}")
 
-        val format = playerResponse.streamingData?.adaptiveFormats
-            ?.filter { it.isAudio && it.isOriginal}
-            ?.maxByOrNull {
+        val audioFormats = playerResponse.streamingData?.adaptiveFormats
+            ?.filter { it.isAudio }
+            ?: return null
+
+        // Try to find original audio first (excludes auto-dubbed tracks)
+        var format = audioFormats
+            .filter { it.isOriginal }
+            .maxByOrNull {
                 it.bitrate * when (audioQuality) {
                     AudioQuality.AUTO -> if (connectivityManager.isActiveNetworkMetered) -1 else 1 - 5
                     AudioQuality.MAX -> 5
@@ -215,8 +220,22 @@ object YTPlayerUtils {
                 } + (if (it.mimeType.startsWith("audio/webm")) 10240 else 0)
             }
 
+        // If no original audio found, fallback to any audio format (includes uploaded songs)
+        if (format == null) {
+            Timber.tag(logTag).d("No original audio format found, trying all audio formats")
+            format = audioFormats
+                .maxByOrNull {
+                    it.bitrate * when (audioQuality) {
+                        AudioQuality.AUTO -> if (connectivityManager.isActiveNetworkMetered) -1 else 1 - 5
+                        AudioQuality.MAX -> 5
+                        AudioQuality.HIGH -> 1
+                        AudioQuality.LOW -> -1
+                    } + (if (it.mimeType.startsWith("audio/webm")) 10240 else 0)
+                }
+        }
+
         if (format != null) {
-            Timber.tag(logTag).d("Selected format: ${format.mimeType}, bitrate: ${format.bitrate}")
+            Timber.tag(logTag).d("Selected format: ${format.mimeType}, bitrate: ${format.bitrate}, isOriginal: ${format.isOriginal}")
         } else {
             Timber.tag(logTag).d("No suitable audio format found")
         }
